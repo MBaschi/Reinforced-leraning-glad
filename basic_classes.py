@@ -25,12 +25,13 @@ DEATH_PENALTY = -10
 class Model():
     def __init__(self):
         self.output_size = (NUM_POSSIBLE_ACTIONS-1)*int(360/RADIAL_RESOLUTION)+1 #the -1 is because the action "rest" does not have a direction
+        self.input_size = len(GLADIATOR_NAMES)*5+1 #5 is the number of features for each gladiator (position x, position y, health, stamina, orientation) and 1 is how much time is left
         self.q_network = nn.Sequential(
             nn.Linear( 100, 10),
             nn.ReLU(),
             nn.Linear(10, 10),
             nn.ReLU(),
-            #the last layer has as many neurons as the number of possible actions with also the direction 
+            #the last layer has as many neurons as the number of possible actions with also the direction
             nn.Linear(10, self.output_size) #the -1 is because the action "rest" does not have a direction
         )
         self.loss_function = nn.MSELoss()
@@ -85,7 +86,7 @@ AI_model=Model()
 
 class Gladiator():
 
-    possible_actions = ["attack", "block", "dodge", "rest", "walk"]
+    possible_actions = ["attack", "block", "dash", "rest", "walk"]
 
     def __init__(self, name, gladiator_id, spawn_point ):
         self.name = name
@@ -98,7 +99,7 @@ class Gladiator():
         self.damage = 10
         self.state = "stay" # stay, walk, attack, block, dodge, rest
         self.range = 5
-        self.speed = 5
+        self.speed = 1
         self.field_view_angle = np.pi/3 # in grad
 
         self.gladiator_id = gladiator_id
@@ -114,6 +115,8 @@ class Gladiator():
         my_state = state[self.gladiator_id]
         state.pop(self.gladiator_id)
         state_tensor = [my_state] + [state[gladiator.gladiator_id] for gladiator in state]
+        state_tensor = state_tensor+ [state['timer']]
+        state_tensor = torch.stack(state_tensor)
         return state_tensor
 
     def choose_action(self, arena_state):
@@ -128,48 +131,56 @@ class Gladiator():
             self.attack(self.direction, gladiators)
         elif self.state == "block":
             self.block()
-        elif self.state == "dodge":
-            self.dodge(self.direction)
+        elif self.state == "dash":
+            self.dash(self.direction)
         elif self.state == "rest":
             self.rest()
         elif self.state == "walk":
             self.walk(self.direction)
 
     def attack(self, direction, gladiators):
+        '''
+        Permorf an attack, reward and block are handeled here:
+        - if the gladiator have stamina enter in the attack condition
+        - create a list with all the target in the hit zone
+        - for each target in the hit zone check if the attack is blocked or is succesfull and also if the target is dead
+        '''
         if self.stamina > 0:
+            self.stamina -= 10
+
+            gladiator_in_hitzone = []
             for gladiator in gladiators:
-                if gladiator != self:
-                    target = gladiator      
-                    if self.is_target_in_hitzone(target, direction):
-                        self.stamina -= 5
-                        self.reward += SUCCESFULL_ATTACK_REWARD #attack hitted the target
+                if gladiator != self and self.is_target_in_hitzone(gladiator, direction):
+                    gladiator_in_hitzone.append(gladiator)
 
-                        if target.state == "block" and target.is_target_in_hitzone(self, target.direction):
-                            target.stamina -= 10
-                            target.reward += BLOCKED_ATTACK_REWARD #attack blocked
-
-                        else:
-                            target.health -= self.damage
-                            self.reward += SUCCESFULL_ATTACK_REWARD #attack succcessful
-                            target.reward += HITTED_PENALTY #target penalized
-                            if target.health <= 0:
-                                #target is dead
-                                self.reward += KILL_REWARD
-                                target.reward += DEATH_PENALTY
-                    else:
-                        self.reward -= 0.25 #attack the air
+            for target in gladiator_in_hitzone:      
+                self.reward += SUCCESFULL_ATTACK_REWARD #attack hitted 
+                if target.state == "block" and target.is_target_in_hitzone(self, target.direction): #target blocked succesfully
+                    target.stamina -= 5
+                    target.reward += BLOCKED_ATTACK_REWARD #attack blocke
+                else:
+                    target.health -= self.damage
+                    self.reward += SUCCESFULL_ATTACK_REWARD #attack succcessful
+                    target.reward += HITTED_PENALTY #target penalized
+                    if target.health <= 0:
+                        #target is dead
+                        self.reward += KILL_REWARD
+                        target.reward += DEATH_PENALTY
+                        #put dead body outside the arena
+                        target.health = 0
+                        target.position = {'x': -1, 'y': -1}
 
     def block(self):
-        #handled in the attack function
-        pass
-
-    def dodge(self, direction):
+        'Since the block lohic is simple is directly handeled in the attack function'
+    
+    def dash(self, direction):
+        'Move the gladiator in the direction of the vector direction with a speed 3 times higher than the normal speed'
         if self.stamina >= 10:
             self.stamina -= 10
 
             direction_vector=convert_direction_to_vector(direction)
             new_position = {'x': self.position['x'] + 3*self.speed*direction_vector['x'], 'y': self.position['y'] + 3*self.speed*direction_vector['y']}
-    
+
             #check if the new position is inside the arena
             for i in ['x', 'y']:
                 if new_position[i] > 0 and new_position[i] < ARENA_SIZE:
@@ -180,10 +191,11 @@ class Gladiator():
                     self.position[i] = ARENA_SIZE
 
     def rest(self):
+        'Recover stamina when resting'
         self.stamina = min(100, self.stamina + 20)
 
     def walk(self, direction):
-        #move the gladiator
+        'Move the gladiator in the direction of the vector direction'
         direction_vector=convert_direction_to_vector(direction)
         new_position = {'x': self.position['x'] + self.speed*direction_vector['x'], 'y': self.position['y'] + self.speed*direction_vector['y']}
 
@@ -227,7 +239,7 @@ class Gladiator():
 def convert_direction_to_vector( direction):
     radian_direction = np.radians(direction)
     return {'x': np.cos(radian_direction), 'y': np.sin(radian_direction)}
-    
+
 class Enviroment():
     timer=10000
 
@@ -250,9 +262,18 @@ class Enviroment():
                                                                 gladiator.health,
                                                                 gladiator.stamina,
                                                                 gladiator.orientation])
+        #add timer 
+        arena_state['timer'] = torch.tensor([self.timer])
         return arena_state
 
-    def next_frame(self):
+    def run_frame(self):
+        '''
+        Run the next frame of the game:
+           - compile the dictionary with the state of the arena
+           - each gladiator alive choose an action
+           - the action is performed and effect (with the reward) are calculated
+           - the reward is used to upgrade the q network of the gladiator
+        '''
         arena_state = self.compile_arena_state()
         #check gladiator alive
         alive_gladiators = [gladiator for gladiator in self.gladiators if gladiator.health > 0]
@@ -269,15 +290,16 @@ class Enviroment():
 
 
     def add_gladiator(self, name, spawn_point):
+        'Add a gladiator to the game'
         self.gladiators.append(Gladiator(name, len(self.gladiators), spawn_point))
 
     def Run(self):
-
+        'Run the game until there is only one gladiator alive or the timer is over'
         for name in GLADIATOR_NAMES:
             self.add_gladiator(name, {'x': random.randint(0, ARENA_SIZE), 'y': random.randint(0, ARENA_SIZE)})
 
         while self.state == "start":
-            self.next_frame()
+            self.run_frame()
             self.timer -= 1
             if len(self.gladiators) == 1:
                 self.state = "end"
@@ -294,3 +316,6 @@ class Enviroment():
                 print("End for timeout!")
 
         print("Game over!")
+
+env = Enviroment()
+env.Run()
