@@ -1,13 +1,15 @@
 import random
 import numpy as np
+import copy
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+random.seed(12321)
 RADIAL_RESOLUTION = 10 #quantization of the direction in degrees
 NUM_POSSIBLE_ACTIONS = 5 #len(Gladiator.possible_actions)
-GLADIATOR_NAMES = ["A", "B", "C", "D"] #this list decide also the number of gladiators in the game
+GLADIATOR_NAMES = ["A", "B"] #this list decide also the number of gladiators in the game
 
 ARENA_SIZE = 100
 
@@ -25,9 +27,9 @@ DEATH_PENALTY = -10
 class Model():
     def __init__(self):
         self.output_size = (NUM_POSSIBLE_ACTIONS-1)*int(360/RADIAL_RESOLUTION)+1 #the -1 is because the action "rest" does not have a direction
-        self.input_size = len(GLADIATOR_NAMES)*5+1 #5 is the number of features for each gladiator (position x, position y, health, stamina, orientation) and 1 is how much time is left
+        self.input_size = len(GLADIATOR_NAMES)*4+1 #5 is the number of features for each gladiator (position x, position y, health, stamina) and 1 is how much time is left
         self.q_network = nn.Sequential(
-            nn.Linear( 100, 10),
+            nn.Linear(self.input_size, 10),
             nn.ReLU(),
             nn.Linear(10, 10),
             nn.ReLU(),
@@ -38,8 +40,6 @@ class Model():
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=0.001)
         self.discount_factor = 0.99
 
-
-
     def next_action(self,
                 state: torch.Tensor
                 )-> torch.Tensor:
@@ -47,13 +47,13 @@ class Model():
 
         #choose the action with the highest q value
         self.q_values = self.q_network(state)
-        self.action_taken = torch.argmax(self.q_values).item()
+        self.output_neur_max = torch.argmax(self.q_values).item()
 
-        if self.action_taken == self.output_size:
+        if self.output_neur_max == self.output_size:
             return NUM_POSSIBLE_ACTIONS , 0 #action "rest" does not have a direction
 
         #transform the action index in the action and the direction
-        action_index, direction_index = divmod(self.action_taken, (NUM_POSSIBLE_ACTIONS-1))
+        action_index, direction_index = divmod(self.output_neur_max, int(360/RADIAL_RESOLUTION))
         #action in degrees
         direction = direction_index*RADIAL_RESOLUTION
         return action_index, direction
@@ -66,7 +66,7 @@ class Model():
             next_state_q_values = self.q_network(next_state)
             max_new_state_q_value = next_state_q_values.max().item()
             target_q_value = reward + self.discount_factor * max_new_state_q_value
-            target_q_value = torch.tensor([target_q_value], dtype=torch.float32)
+            target_q_value = torch.tensor(target_q_value, dtype=torch.float32)
         return target_q_value
 
     def upgrade(self,
@@ -74,7 +74,7 @@ class Model():
                 next_state:torch.Tensor
                 )-> None:
 
-        predicted_q_value = self.q_values[self.action_taken]
+        predicted_q_value = torch.max(self.q_values)
         target_q_value = self.calculate_target_q_values(reward, next_state)
 
         loss = self.loss_function(predicted_q_value, target_q_value)
@@ -82,20 +82,17 @@ class Model():
         loss.backward()
         self.optimizer.step()
 
-AI_model=Model()
-
 class Gladiator():
 
     possible_actions = ["attack", "block", "dash", "rest", "walk"]
 
     def __init__(self, name, gladiator_id, spawn_point ):
         self.name = name
-
+ 
         self.position={'x': spawn_point['x'], 'y': spawn_point['y']}
-        self.orientation = 0
-
         self.health = 100
         self.stamina = 100
+
         self.damage = 10
         self.state = "stay" # stay, walk, attack, block, dodge, rest
         self.range = 5
@@ -114,13 +111,13 @@ class Gladiator():
            the first row is the state of the gladiator itself'''
         my_state = state[self.gladiator_id]
         state.pop(self.gladiator_id)
-        state_tensor = [my_state] + [state[gladiator.gladiator_id] for gladiator in state]
-        state_tensor = state_tensor+ [state['timer']]
-        state_tensor = torch.stack(state_tensor)
+        state_tensor = [my_state] + [state[keys_left] for keys_left in state]
+        state_tensor = torch.cat(state_tensor)
         return state_tensor
 
     def choose_action(self, arena_state):
         if self.stamina > 0:
+            arena_state=self.convert_state_to_tensor(arena_state)
             action_index, self.direction=self.brain.next_action(arena_state)
             self.state = self.possible_actions[action_index]
             if self.stamina >100: self.stamina = 100
@@ -172,7 +169,7 @@ class Gladiator():
 
     def block(self):
         'Since the block lohic is simple is directly handeled in the attack function'
-    
+
     def dash(self, direction):
         'Move the gladiator in the direction of the vector direction with a speed 3 times higher than the normal speed'
         if self.stamina >= 10:
@@ -260,10 +257,9 @@ class Enviroment():
             arena_state[gladiator.gladiator_id] = torch.tensor([gladiator.position['x'],
                                                                 gladiator.position['y'],
                                                                 gladiator.health,
-                                                                gladiator.stamina,
-                                                                gladiator.orientation])
+                                                                gladiator.stamina], dtype=torch.float32)
         #add timer 
-        arena_state['timer'] = torch.tensor([self.timer])
+        arena_state['timer'] = torch.tensor([self.timer], dtype=torch.float32)
         return arena_state
 
     def run_frame(self):
@@ -279,14 +275,14 @@ class Enviroment():
         alive_gladiators = [gladiator for gladiator in self.gladiators if gladiator.health > 0]
     
         for gladiator in alive_gladiators:
-            gladiator.choose_action(arena_state)
+            gladiator.choose_action(copy.deepcopy(arena_state))
 
         for gladiator in alive_gladiators:
             gladiator.perform_action(self.gladiators)
 
         for gladiator in alive_gladiators:
-            gladiator.reward -= TIMEOUT_PENALTY #penalize the gladiator for not doing anything
-            gladiator.brain.upgrade(gladiator.reward, gladiator.convert_state_to_tensor(arena_state))
+            gladiator.reward += TIMEOUT_PENALTY #penalize the gladiator for not doing anything
+            gladiator.brain.upgrade(gladiator.reward, gladiator.convert_state_to_tensor(copy.deepcopy(arena_state)))
 
 
     def add_gladiator(self, name, spawn_point):
