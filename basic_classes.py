@@ -5,7 +5,9 @@ import copy
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchviz import make_dot
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 torch.autograd.set_detect_anomaly(True)
 
 random.seed(12321)
@@ -21,7 +23,7 @@ BLOCKED_ATTACK_REWARD = 2
 KILL_REWARD = 10
 
 HITTED_PENALTY = -2
-MISSED_ATTACK_PENALTY = -0.25    
+MISSED_ATTACK_PENALTY = -0.25
 TIMEOUT_PENALTY = -0.1
 DEATH_PENALTY = -10
 
@@ -241,7 +243,7 @@ def convert_direction_to_vector( direction):
     return {'x': np.cos(radian_direction), 'y': np.sin(radian_direction)}
 
 class Enviroment():
-    timer=10000
+    timer=100
 
     def __init__(self) :
         self.gladiators = []
@@ -293,20 +295,28 @@ class Enviroment():
 
     def Run(self):
         'Run the game until there is only one gladiator alive or the timer is over'
+        self.fig, self.ax = plt.subplots()
+
         for name in GLADIATOR_NAMES:
             self.add_gladiator(name, {'x': random.randint(0, ARENA_SIZE), 'y': random.randint(0, ARENA_SIZE)})
 
         while self.state == "start":
             print(f"Timer: {self.timer}")
+            # Run the next frame of the game
             self.run_frame()
             self.timer -= 1
+           
+            # Draw the game
+            self.animate(0)
+            plt.pause(0.1)
+            
+            #check if the game is over
             if len(self.gladiators) == 1:
                 self.state = "end"
                 print(self.gladiators[0].name + " won the game!")
                 self.gladiators[0].reward += WIN_REWARD
                 arena_state = self.compile_arena_state()
                 self.gladiators[0].brain.upgrade(self.gladiators[0].reward, self.gladiators[0].convert_state_to_tensor(arena_state))
-
             elif len(self.gladiators) == 0:
                 self.state = "end"
                 print("It's a draw!")
@@ -314,7 +324,35 @@ class Enviroment():
                 self.state = "end"
                 print("End for timeout!")
 
+        plt.show()
         print("Game over!")
+    
+    def animate(self, i):
+        self.ax.clear()
+        #draw arena border
+        self.ax.add_artist(plt.Rectangle((0, 0), ARENA_SIZE, ARENA_SIZE, fill=False))
+        #draw gladiators
+        for gladiator in self.gladiators:                
+            self.draw_gladiator(gladiator.name,
+                            (gladiator.position['x'], gladiator.position['y']),
+                            gladiator.health,
+                            gladiator.stamina,
+                            gladiator.direction,
+                            gladiator.state)
+            
+    def draw_gladiator(self, name, postion, health, stamina, direction, action):
+        self.ax.text(postion[0], postion[1], name, fontsize=12, ha='center')
+        # Draw gladiator
+        self.ax.add_artist(plt.Circle(postion, 10, color='r', fill=False))
+        # Draw health bar
+        self.ax.add_artist(plt.Rectangle((postion[0]-0.1, postion[1]+0.2), health/100, 0.1, color='g'))
+        # Draw stamina bar
+        self.ax.add_artist(plt.Rectangle((postion[0]-0.1, postion[1]+0.3), stamina/100, 0.1, color='b'))
+        # Draw direction
+        self.ax.add_artist(plt.Arrow(postion[0], postion[1], 0.1*np.cos(np.radians(direction)), 0.1*np.sin(np.radians(direction)), color='k'))
+        # Draw action
+        self.ax.text(postion[0], postion[1]-0.2, action, fontsize=12, ha='center')
 
+plt.show()
 env = Enviroment()
 env.Run()
