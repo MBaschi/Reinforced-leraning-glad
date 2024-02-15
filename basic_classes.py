@@ -5,6 +5,8 @@ import copy
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torchviz import make_dot
+torch.autograd.set_detect_anomaly(True)
 
 random.seed(12321)
 RADIAL_RESOLUTION = 10 #quantization of the direction in degrees
@@ -25,7 +27,8 @@ DEATH_PENALTY = -10
 
 
 class Model():
-    def __init__(self):
+    def __init__(self,gladiator_name):
+        self.gladiator_name = gladiator_name
         self.output_size = (NUM_POSSIBLE_ACTIONS-1)*int(360/RADIAL_RESOLUTION)+1 #the -1 is because the action "rest" does not have a direction
         self.input_size = len(GLADIATOR_NAMES)*4+1 #5 is the number of features for each gladiator (position x, position y, health, stamina) and 1 is how much time is left
         self.q_network = nn.Sequential(
@@ -76,11 +79,10 @@ class Model():
 
         predicted_q_value = torch.max(self.q_values)
         target_q_value = self.calculate_target_q_values(reward, next_state)
-
         loss = self.loss_function(predicted_q_value, target_q_value)
-        self.optimizer.zero_grad()
-        loss.backward()
+        loss.backward(retain_graph=True)
         self.optimizer.step()
+        self.optimizer.zero_grad()
 
 class Gladiator():
 
@@ -100,7 +102,7 @@ class Gladiator():
         self.field_view_angle = np.pi/3 # in grad
 
         self.gladiator_id = gladiator_id
-        self.brain = Model()
+        self.brain = Model(gladiator_name=self.name)
 
         self.target=None
         self.direction=0
@@ -116,12 +118,13 @@ class Gladiator():
         return state_tensor
 
     def choose_action(self, arena_state):
-        if self.stamina > 0:
-            arena_state=self.convert_state_to_tensor(arena_state)
-            action_index, self.direction=self.brain.next_action(arena_state)
-            self.state = self.possible_actions[action_index]
-            if self.stamina >100: self.stamina = 100
-        else: self.state = "rest"
+        arena_state=self.convert_state_to_tensor(arena_state)
+        action_index, self.direction=self.brain.next_action(arena_state)
+        self.state = self.possible_actions[action_index]
+        if self.stamina >100: self.stamina = 100
+        if self.stamina <0:
+            self.stamina = 0
+            self.state = "rest"
 
     def perform_action(self, gladiators):
         if self.state == "attack":
@@ -150,7 +153,7 @@ class Gladiator():
                 if gladiator != self and self.is_target_in_hitzone(gladiator, direction):
                     gladiator_in_hitzone.append(gladiator)
 
-            for target in gladiator_in_hitzone:      
+            for target in gladiator_in_hitzone:     
                 self.reward += SUCCESFULL_ATTACK_REWARD #attack hitted 
                 if target.state == "block" and target.is_target_in_hitzone(self, target.direction): #target blocked succesfully
                     target.stamina -= 5
@@ -273,7 +276,7 @@ class Enviroment():
         arena_state = self.compile_arena_state()
         #check gladiator alive
         alive_gladiators = [gladiator for gladiator in self.gladiators if gladiator.health > 0]
-    
+
         for gladiator in alive_gladiators:
             gladiator.choose_action(copy.deepcopy(arena_state))
 
@@ -283,7 +286,6 @@ class Enviroment():
         for gladiator in alive_gladiators:
             gladiator.reward += TIMEOUT_PENALTY #penalize the gladiator for not doing anything
             gladiator.brain.upgrade(gladiator.reward, gladiator.convert_state_to_tensor(copy.deepcopy(arena_state)))
-
 
     def add_gladiator(self, name, spawn_point):
         'Add a gladiator to the game'
@@ -295,6 +297,7 @@ class Enviroment():
             self.add_gladiator(name, {'x': random.randint(0, ARENA_SIZE), 'y': random.randint(0, ARENA_SIZE)})
 
         while self.state == "start":
+            print(f"Timer: {self.timer}")
             self.run_frame()
             self.timer -= 1
             if len(self.gladiators) == 1:
