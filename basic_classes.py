@@ -1,32 +1,20 @@
-import random
+"""In this file are defined the object of the game with theri logic:
+- Model: the q network of the gladiator
+- Gladiator: the gladiator object 
+- Enviroment: the enviroment of the game 
+"""
 import numpy as np
 import copy
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+
+import pygame
+
+from config import RADIAL_RESOLUTION, GLADIATOR_NAMES, NUM_POSSIBLE_ACTIONS, ARENA_SIZE, SUCCESFULL_ATTACK_REWARD, BLOCKED_ATTACK_REWARD, KILL_REWARD, HITTED_PENALTY, TIMEOUT_PENALTY, DEATH_PENALTY
+from config import ARENA_VISUALIZATION_SIZE, GLADIATOR_SIZE, STATS_BARS_SIZE, LINE_SIZE
 torch.autograd.set_detect_anomaly(True)
-
-random.seed(12321)
-RADIAL_RESOLUTION = 10 #quantization of the direction in degrees
-NUM_POSSIBLE_ACTIONS = 5 #len(Gladiator.possible_actions)
-GLADIATOR_NAMES = ["A", "B"] #this list decide also the number of gladiators in the game
-
-ARENA_SIZE = 100
-
-WIN_REWARD = 100
-SUCCESFULL_ATTACK_REWARD = 2
-BLOCKED_ATTACK_REWARD = 2
-KILL_REWARD = 10
-
-HITTED_PENALTY = -2
-MISSED_ATTACK_PENALTY = -0.25
-TIMEOUT_PENALTY = -0.1
-DEATH_PENALTY = -10
-
 
 class Model():
     def __init__(self,gladiator_name):
@@ -243,13 +231,12 @@ def convert_direction_to_vector( direction):
     return {'x': np.cos(radian_direction), 'y': np.sin(radian_direction)}
 
 class Enviroment():
-    timer=100
 
     def __init__(self) :
         self.gladiators = []
         self.state = "start"
 
-    def compile_arena_state(self):
+    def compile_arena_state(self,time):
         '''
         Rerurn a dictionary with keys the gladiator id and values a torche tensor with the following information:
         - position of each gladiator
@@ -264,10 +251,10 @@ class Enviroment():
                                                                 gladiator.health,
                                                                 gladiator.stamina], dtype=torch.float32)
         #add timer 
-        arena_state['timer'] = torch.tensor([self.timer], dtype=torch.float32)
+        arena_state['timer'] = torch.tensor([time], dtype=torch.float32)
         return arena_state
 
-    def run_frame(self):
+    def run_frame(self,time):
         '''
         Run the next frame of the game:
            - compile the dictionary with the state of the arena
@@ -275,16 +262,16 @@ class Enviroment():
            - the action is performed and effect (with the reward) are calculated
            - the reward is used to upgrade the q network of the gladiator
         '''
-        arena_state = self.compile_arena_state()
+        arena_state = self.compile_arena_state(time)
         #check gladiator alive
         alive_gladiators = [gladiator for gladiator in self.gladiators if gladiator.health > 0]
-
+        #each gladiator choose an action
         for gladiator in alive_gladiators:
             gladiator.choose_action(copy.deepcopy(arena_state))
-
+        #each gladiator perform the action
         for gladiator in alive_gladiators:
             gladiator.perform_action(self.gladiators)
-
+        #based on the action effect calculate the reward and upgrade the q network
         for gladiator in alive_gladiators:
             gladiator.reward += TIMEOUT_PENALTY #penalize the gladiator for not doing anything
             gladiator.brain.upgrade(gladiator.reward, gladiator.convert_state_to_tensor(copy.deepcopy(arena_state)))
@@ -292,67 +279,41 @@ class Enviroment():
     def add_gladiator(self, name, spawn_point):
         'Add a gladiator to the game'
         self.gladiators.append(Gladiator(name, len(self.gladiators), spawn_point))
-
-    def Run(self):
-        'Run the game until there is only one gladiator alive or the timer is over'
-        self.fig, self.ax = plt.subplots()
-
-        for name in GLADIATOR_NAMES:
-            self.add_gladiator(name, {'x': random.randint(0, ARENA_SIZE), 'y': random.randint(0, ARENA_SIZE)})
-
-        while self.state == "start":
-            print(f"Timer: {self.timer}")
-            # Run the next frame of the game
-            self.run_frame()
-            self.timer -= 1
-           
-            # Draw the game
-            self.animate(0)
-            plt.pause(0.1)
-            
-            #check if the game is over
-            if len(self.gladiators) == 1:
-                self.state = "end"
-                print(self.gladiators[0].name + " won the game!")
-                self.gladiators[0].reward += WIN_REWARD
-                arena_state = self.compile_arena_state()
-                self.gladiators[0].brain.upgrade(self.gladiators[0].reward, self.gladiators[0].convert_state_to_tensor(arena_state))
-            elif len(self.gladiators) == 0:
-                self.state = "end"
-                print("It's a draw!")
-            elif self.timer == 0:
-                self.state = "end"
-                print("End for timeout!")
-
-        plt.show()
-        print("Game over!")
     
-    def animate(self, i):
-        self.ax.clear()
-        #draw arena border
-        self.ax.add_artist(plt.Rectangle((0, 0), ARENA_SIZE, ARENA_SIZE, fill=False))
+    def draw(self,pygame_screen):
+        #draw background
+        pygame_screen.fill((0, 0, 0))
+        #draw arena
+        pygame.draw.rect(pygame_screen, (255, 255, 255), (0, 0, ARENA_VISUALIZATION_SIZE, ARENA_VISUALIZATION_SIZE), 2)
         #draw gladiators
         for gladiator in self.gladiators:                
-            self.draw_gladiator(gladiator.name,
-                            (gladiator.position['x'], gladiator.position['y']),
-                            gladiator.health,
-                            gladiator.stamina,
-                            gladiator.direction,
-                            gladiator.state)
-            
-    def draw_gladiator(self, name, postion, health, stamina, direction, action):
-        self.ax.text(postion[0], postion[1], name, fontsize=12, ha='center')
-        # Draw gladiator
-        self.ax.add_artist(plt.Circle(postion, 10, color='r', fill=False))
-        # Draw health bar
-        self.ax.add_artist(plt.Rectangle((postion[0]-0.1, postion[1]+0.2), health/100, 0.1, color='g'))
-        # Draw stamina bar
-        self.ax.add_artist(plt.Rectangle((postion[0]-0.1, postion[1]+0.3), stamina/100, 0.1, color='b'))
-        # Draw direction
-        self.ax.add_artist(plt.Arrow(postion[0], postion[1], 0.1*np.cos(np.radians(direction)), 0.1*np.sin(np.radians(direction)), color='k'))
-        # Draw action
-        self.ax.text(postion[0], postion[1]-0.2, action, fontsize=12, ha='center')
+            self.draw_gladiator(pygame_screen,
+                                gladiator.name,
+                               (gladiator.position['x'], gladiator.position['y']),
+                               gladiator.health,
+                               gladiator.stamina,
+                               gladiator.direction,
+                               gladiator.state)
+        #draw dashboard
+        for gladiator in self.gladiators:
+            font = pygame.font.Font(None, 25)
+            text = font.render(
+                f"{gladiator.name} - health: {gladiator.health} - stamina: {gladiator.stamina} - "
+                f"action: {gladiator.state} - pos: {gladiator.position['x']},{gladiator.position['y']}", 
+                True, 
+                (255, 255, 255)
+            )
+            pygame_screen.blit(text, (0,ARENA_VISUALIZATION_SIZE + 10 + 30*gladiator.gladiator_id))
 
-plt.show()
-env = Enviroment()
-env.Run()
+    def draw_gladiator(self, screen, name, postion, health, stamina, direction, action):
+        postion = (int(postion[0]/ARENA_SIZE*ARENA_VISUALIZATION_SIZE), int(postion[1]/ARENA_SIZE*ARENA_VISUALIZATION_SIZE))
+        # Draw gladiator
+        pygame.draw.circle(screen, (0, 0, 255), postion, GLADIATOR_SIZE)
+        # Draw health bar
+        pygame.draw.rect(screen, (255, 0, 0), (postion[0]-5, postion[1]-5, health, STATS_BARS_SIZE))
+        # Draw stamina bar
+        pygame.draw.rect(screen, (0, 255, 0), (postion[0]-5, postion[1]-7, stamina, STATS_BARS_SIZE))
+        # Draw direction
+        pygame.draw.line(screen, (255, 255, 255), postion, (postion[0]+10*np.cos(np.radians(direction)), postion[1]+10*np.sin(np.radians(direction))), LINE_SIZE)
+
+        
