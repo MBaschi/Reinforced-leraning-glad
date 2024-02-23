@@ -22,12 +22,14 @@ class Model():
         self.output_size = (NUM_POSSIBLE_ACTIONS-1)*int(360/RADIAL_RESOLUTION)+1 #the -1 is because the action "rest" does not have a direction
         self.input_size = len(GLADIATOR_NAMES)*4+1 #5 is the number of features for each gladiator (position x, position y, health, stamina) and 1 is how much time is left
         self.q_network = nn.Sequential(
-            nn.Linear(self.input_size, 10),
+            nn.Linear(self.input_size, 40),
             nn.ReLU(),
-            nn.Linear(10, 10),
+            nn.Linear(40, 60),
+            nn.ReLU(),
+            nn.Linear(60, 100),
             nn.ReLU(),
             #the last layer has as many neurons as the number of possible actions with also the direction
-            nn.Linear(10, self.output_size) #the -1 is because the action "rest" does not have a direction
+            nn.Linear(100, self.output_size) #the -1 is because the action "rest" does not have a direction
         )
         self.loss_function = nn.MSELoss()
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=0.001)
@@ -66,7 +68,6 @@ class Model():
                 reward:torch.Tensor,
                 next_state:torch.Tensor
                 )-> None:
-
         predicted_q_value = torch.max(self.q_values)
         target_q_value = self.calculate_target_q_values(reward, next_state)
         loss = self.loss_function(predicted_q_value, target_q_value)
@@ -87,7 +88,7 @@ class Gladiator():
 
         self.damage = 10
         self.state = "stay" # stay, walk, attack, block, dodge, rest
-        self.range = 5
+        self.range = 10
         self.speed = 1
         self.field_view_angle = np.pi/3 # in grad
 
@@ -226,6 +227,14 @@ class Gladiator():
 
         return is_in_field_of_view and is_in_range
 
+    def respawn(self,position):
+        self.position = position
+        self.health = 100
+        self.stamina = 100
+        self.state = "stay"
+        self.direction = 0
+        self.reward = 0
+
 def convert_direction_to_vector( direction):
     radian_direction = np.radians(direction)
     return {'x': np.cos(radian_direction), 'y': np.sin(radian_direction)}
@@ -315,5 +324,4 @@ class Enviroment():
         pygame.draw.rect(screen, (0, 255, 0), (postion[0]-5, postion[1]-7, stamina, STATS_BARS_SIZE))
         # Draw direction
         pygame.draw.line(screen, (255, 255, 255), postion, (postion[0]+10*np.cos(np.radians(direction)), postion[1]+10*np.sin(np.radians(direction))), LINE_SIZE)
-
-        
+   
