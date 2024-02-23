@@ -3,15 +3,15 @@
 - Gladiator: the gladiator object 
 - Enviroment: the enviroment of the game 
 """
-import numpy as np
 import copy
+import numpy as np
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-import pygame
-
+from config import GLADIATOR_HEALTH,GLADIATOR_STAMINA,GLADIATOR_ATTACK_DAMAGE,GLADIATOR_ATTACK_RANGE,GLADIATOR_SPEED
 from config import RADIAL_RESOLUTION, GLADIATOR_NAMES, NUM_POSSIBLE_ACTIONS, ARENA_SIZE, SUCCESFULL_ATTACK_REWARD, BLOCKED_ATTACK_REWARD, KILL_REWARD, HITTED_PENALTY, TIMEOUT_PENALTY, DEATH_PENALTY
 from config import ARENA_VISUALIZATION_SIZE, GLADIATOR_SIZE, STATS_BARS_SIZE, LINE_SIZE
 torch.autograd.set_detect_anomaly(True)
@@ -22,14 +22,14 @@ class Model():
         self.output_size = (NUM_POSSIBLE_ACTIONS-1)*int(360/RADIAL_RESOLUTION)+1 #the -1 is because the action "rest" does not have a direction
         self.input_size = len(GLADIATOR_NAMES)*4+1 #5 is the number of features for each gladiator (position x, position y, health, stamina) and 1 is how much time is left
         self.q_network = nn.Sequential(
-            nn.Linear(self.input_size, 40),
+            nn.Linear(self.input_size, 10),
             nn.ReLU(),
-            nn.Linear(40, 60),
+            nn.Linear(10, 10),
             nn.ReLU(),
-            nn.Linear(60, 100),
+            nn.Linear(10, 10),
             nn.ReLU(),
             #the last layer has as many neurons as the number of possible actions with also the direction
-            nn.Linear(100, self.output_size) #the -1 is because the action "rest" does not have a direction
+            nn.Linear(10, self.output_size) #the -1 is because the action "rest" does not have a direction
         )
         self.loss_function = nn.MSELoss()
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=0.001)
@@ -83,13 +83,13 @@ class Gladiator():
         self.name = name
  
         self.position={'x': spawn_point['x'], 'y': spawn_point['y']}
-        self.health = 100
-        self.stamina = 100
+        self.health = GLADIATOR_HEALTH
+        self.stamina = GLADIATOR_STAMINA
 
-        self.damage = 10
+        self.damage = GLADIATOR_ATTACK_DAMAGE
         self.state = "stay" # stay, walk, attack, block, dodge, rest
-        self.range = 10
-        self.speed = 1
+        self.range = GLADIATOR_ATTACK_RANGE
+        self.speed = GLADIATOR_SPEED
         self.field_view_angle = np.pi/3 # in grad
 
         self.gladiator_id = gladiator_id
@@ -288,40 +288,38 @@ class Enviroment():
     def add_gladiator(self, name, spawn_point):
         'Add a gladiator to the game'
         self.gladiators.append(Gladiator(name, len(self.gladiators), spawn_point))
-    
-    def draw(self,pygame_screen):
-        #draw background
-        pygame_screen.fill((0, 0, 0))
-        #draw arena
-        pygame.draw.rect(pygame_screen, (255, 255, 255), (0, 0, ARENA_VISUALIZATION_SIZE, ARENA_VISUALIZATION_SIZE), 2)
-        #draw gladiators
-        for gladiator in self.gladiators:                
-            self.draw_gladiator(pygame_screen,
-                                gladiator.name,
-                               (gladiator.position['x'], gladiator.position['y']),
-                               gladiator.health,
-                               gladiator.stamina,
-                               gladiator.direction,
-                               gladiator.state)
-        #draw dashboard
-        for gladiator in self.gladiators:
-            font = pygame.font.Font(None, 25)
-            text = font.render(
-                f"{gladiator.name} - health: {gladiator.health} - stamina: {gladiator.stamina} - "
-                f"action: {gladiator.state} - pos: {gladiator.position['x']},{gladiator.position['y']}", 
-                True, 
-                (255, 255, 255)
-            )
-            pygame_screen.blit(text, (0,ARENA_VISUALIZATION_SIZE + 10 + 30*gladiator.gladiator_id))
 
-    def draw_gladiator(self, screen, name, postion, health, stamina, direction, action):
-        postion = (int(postion[0]/ARENA_SIZE*ARENA_VISUALIZATION_SIZE), int(postion[1]/ARENA_SIZE*ARENA_VISUALIZATION_SIZE))
+    def draw(self, ax):
+        # Draw background
+        ax.set_facecolor((0, 0, 0))
+
+        # Draw arena
+        rect = plt.Rectangle((0, 0), ARENA_SIZE, ARENA_SIZE, linewidth=2, edgecolor=(1, 1, 1), facecolor='none')
+        ax.add_patch(rect)
+
+        # Draw gladiators
+        for gladiator in self.gladiators:
+            self.draw_gladiator(ax, gladiator.name, (gladiator.position['x'], gladiator.position['y']), gladiator.health, gladiator.stamina, gladiator.direction, gladiator.state)
+
+        # Draw dashboard
+        for i, gladiator in enumerate(self.gladiators):
+            text = f"{gladiator.name} - health: {gladiator.health} - stamina: {gladiator.stamina} - action: {gladiator.state} - pos: {gladiator.position['x']},{gladiator.position['y']}"
+            ax.text(0, ARENA_SIZE + 0.1*ARENA_SIZE + 0.3*ARENA_SIZE* i, text, color=(1, 1, 1), fontsize=10)
+    
+    def draw_gladiator(self, ax, name, position, health, stamina, direction, action):
+
         # Draw gladiator
-        pygame.draw.circle(screen, (0, 0, 255), postion, GLADIATOR_SIZE)
+        circle = plt.Circle(position, GLADIATOR_SIZE, color=(0, 0, 1))
+        ax.add_artist(circle)
+
         # Draw health bar
-        pygame.draw.rect(screen, (255, 0, 0), (postion[0]-5, postion[1]-5, health, STATS_BARS_SIZE))
+        ax.add_patch(plt.Rectangle((position[0], position[1] - GLADIATOR_SIZE*1.2), 1.2*GLADIATOR_SIZE*(health / GLADIATOR_HEALTH), STATS_BARS_SIZE, color=(1, 0, 0)))
+        
         # Draw stamina bar
-        pygame.draw.rect(screen, (0, 255, 0), (postion[0]-5, postion[1]-7, stamina, STATS_BARS_SIZE))
+        ax.add_patch(plt.Rectangle((position[0], position[1] - GLADIATOR_SIZE*1.2), 1.2*GLADIATOR_SIZE*(stamina / GLADIATOR_STAMINA), STATS_BARS_SIZE, color=(0, 1, 0)))
+
         # Draw direction
-        pygame.draw.line(screen, (255, 255, 255), postion, (postion[0]+10*np.cos(np.radians(direction)), postion[1]+10*np.sin(np.radians(direction))), LINE_SIZE)
+        direction_line_x = [position[0], position[0] + GLADIATOR_ATTACK_RANGE * np.cos(np.radians(direction))]
+        direction_line_y = [position[1], position[1] + GLADIATOR_ATTACK_RANGE * np.sin(np.radians(direction))]
+        ax.plot(direction_line_x, direction_line_y, color=(1, 1, 1))
    

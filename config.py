@@ -1,12 +1,20 @@
 "In this file are defined the main configurations of the game"
 import random
+import os
 
 random.seed(12321)
+#GLADIATOR VARIABLES
+GLADIATOR_HEALTH = 100
+GLADIATOR_STAMINA = 100
+GLADIATOR_SPEED = 1
+GLADIATOR_ATTACK_RANGE = 10
+GLADIATOR_ATTACK_DAMAGE = 10
+
 
 #SIMULATION VARIABLES
 RADIAL_RESOLUTION = 10 #quantization of the direction in degrees
 GLADIATOR_NAMES = ["A", "B"] #this list decide also the number of gladiators in the game
-TIMER= 1000 #max number of turns
+TIMER= 100 #max number of turns
 
 #ARENA VARIABLE
 ARENA_SIZE = 100
@@ -23,17 +31,22 @@ TIMEOUT_PENALTY = -0.1
 DEATH_PENALTY = -10
 
 #TRAINING VARIABLES
-TRAINING_EPISODES = 1000
+TRAINING_EPISODES = 1
 
 #VISUALIZATION VARIABLES
 VIEW = True
-VIEW_EVERY = 10
-SCREEN_HEIGHT = 1000
-SCREEN_WIDTH = 1000
-ARENA_VISUALIZATION_SIZE = int(SCREEN_HEIGHT*0.8)
+VIEW_EVERY = 1
+SCREEN_HEIGHT = 10
+SCREEN_WIDTH = 10
+ARENA_VISUALIZATION_SIZE = ARENA_SIZE
 GLADIATOR_SIZE = int(ARENA_VISUALIZATION_SIZE*0.01)
-STATS_BARS_SIZE = int(GLADIATOR_SIZE/3)
+STATS_BARS_SIZE = int(GLADIATOR_SIZE/2)
 LINE_SIZE = int(GLADIATOR_SIZE/3)
+
+#SAVING PATHS
+BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+MODEL_SAVE_PATH = os.path.join(BASE_PATH, "models")
+SIMUALTION_RECORD_PATH = os.path.join(BASE_PATH, "simulations_record")
 
 #FIXED VARIABLES: can't be changed, inserted just for readability
 NUM_POSSIBLE_ACTIONS = 5 #len(Gladiator.possible_actions)
