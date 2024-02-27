@@ -6,14 +6,16 @@
 import copy
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from config import TIMER, TIMER_POSITION, TIMER_RADIUS
 from config import GLADIATOR_HEALTH,GLADIATOR_STAMINA,GLADIATOR_ATTACK_DAMAGE,GLADIATOR_ATTACK_RANGE,GLADIATOR_SPEED
 from config import RADIAL_RESOLUTION, GLADIATOR_NAMES, NUM_POSSIBLE_ACTIONS, ARENA_SIZE, SUCCESFULL_ATTACK_REWARD, BLOCKED_ATTACK_REWARD, KILL_REWARD, HITTED_PENALTY, TIMEOUT_PENALTY, DEATH_PENALTY
-from config import ARENA_VISUALIZATION_SIZE, GLADIATOR_SIZE, STATS_BARS_SIZE, LINE_SIZE
+from config import ARENA_VISUALIZATION_SIZE, GLADIATOR_SIZE, STATS_BARS_HIGHT, STATS_BARS_LENGTH, LINE_SIZE
 torch.autograd.set_detect_anomaly(True)
 
 class Model():
@@ -22,14 +24,14 @@ class Model():
         self.output_size = (NUM_POSSIBLE_ACTIONS-1)*int(360/RADIAL_RESOLUTION)+1 #the -1 is because the action "rest" does not have a direction
         self.input_size = len(GLADIATOR_NAMES)*4+1 #5 is the number of features for each gladiator (position x, position y, health, stamina) and 1 is how much time is left
         self.q_network = nn.Sequential(
-            nn.Linear(self.input_size, 10),
+            nn.Linear(self.input_size, self.input_size*2),
             nn.ReLU(),
-            nn.Linear(10, 10),
+            nn.Linear(self.input_size*2, self.input_size*2),
             nn.ReLU(),
-            nn.Linear(10, 10),
+            nn.Linear(self.input_size*2, self.output_size),
             nn.ReLU(),
             #the last layer has as many neurons as the number of possible actions with also the direction
-            nn.Linear(10, self.output_size) #the -1 is because the action "rest" does not have a direction
+            nn.Linear(self.output_size, self.output_size) #the -1 is because the action "rest" does not have a direction
         )
         self.loss_function = nn.MSELoss()
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=0.001)
@@ -289,7 +291,7 @@ class Enviroment():
         'Add a gladiator to the game'
         self.gladiators.append(Gladiator(name, len(self.gladiators), spawn_point))
 
-    def draw(self, ax):
+    def draw(self, ax, time):
         # Draw background
         ax.set_facecolor((0, 0, 0))
 
@@ -302,10 +304,20 @@ class Enviroment():
             self.draw_gladiator(ax, gladiator.name, (gladiator.position['x'], gladiator.position['y']), gladiator.health, gladiator.stamina, gladiator.direction, gladiator.state)
 
         # Draw dashboard
-        for i, gladiator in enumerate(self.gladiators):
-            text = f"{gladiator.name} - health: {gladiator.health} - stamina: {gladiator.stamina} - action: {gladiator.state} - pos: {gladiator.position['x']},{gladiator.position['y']}"
-            ax.text(0, ARENA_SIZE + 0.1*ARENA_SIZE + 0.3*ARENA_SIZE* i, text, color=(1, 1, 1), fontsize=10)
-    
+        cell_text = []
+        for gladiator in self.gladiators:
+            row = [gladiator.name, f"{gladiator.health:.1f}", f"{gladiator.stamina:.1f}", gladiator.state, f"{gladiator.position['x']:.1f},{gladiator.position['y']:.1f}", f"{gladiator.reward:.1f}"]
+            cell_text.append(row)
+        table = ax.table(cellText=cell_text, colLabels=["Name", "Health", "Stamina", "Action", "Position", "Reward"], loc='upper center', cellLoc = 'center', colColours =["palegreen"]*6, bbox=[0, -0.1, 1, 0.1])
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1, 1.5)
+
+        # Draw circular countdown timer
+        remaining_time_ratio = time / TIMER
+        countdown_wedge = patches.Wedge(TIMER_POSITION, TIMER_RADIUS, 90, 90 - 360 * remaining_time_ratio, transform=ax.transAxes, color='red')
+        ax.add_patch(countdown_wedge)
+
     def draw_gladiator(self, ax, name, position, health, stamina, direction, action):
 
         # Draw gladiator
@@ -313,10 +325,10 @@ class Enviroment():
         ax.add_artist(circle)
 
         # Draw health bar
-        ax.add_patch(plt.Rectangle((position[0], position[1] - GLADIATOR_SIZE*1.2), 1.2*GLADIATOR_SIZE*(health / GLADIATOR_HEALTH), STATS_BARS_SIZE, color=(1, 0, 0)))
+        ax.add_patch(plt.Rectangle((position[0], position[1] - GLADIATOR_SIZE*1.2), STATS_BARS_LENGTH*(health / GLADIATOR_HEALTH), STATS_BARS_HIGHT, color=(1, 0, 0)))
         
         # Draw stamina bar
-        ax.add_patch(plt.Rectangle((position[0], position[1] - GLADIATOR_SIZE*1.2), 1.2*GLADIATOR_SIZE*(stamina / GLADIATOR_STAMINA), STATS_BARS_SIZE, color=(0, 1, 0)))
+        ax.add_patch(plt.Rectangle((position[0], position[1] - GLADIATOR_SIZE*1.2-2*STATS_BARS_HIGHT), STATS_BARS_LENGTH*(stamina / GLADIATOR_STAMINA), STATS_BARS_HIGHT, color=(0, 1, 0)))
 
         # Draw direction
         direction_line_x = [position[0], position[0] + GLADIATOR_ATTACK_RANGE * np.cos(np.radians(direction))]
