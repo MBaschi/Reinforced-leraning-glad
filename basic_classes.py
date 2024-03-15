@@ -49,8 +49,8 @@ class Model:
             360 / RADIAL_RESOLUTION
         ) + 1  # the -1 is because the action "rest" does not have a direction
         self.input_size = (
-            len(GLADIATOR_NAMES) * 4 + 1
-        )  # 5 is the number of features for each gladiator (position x, position y, health, stamina) and 1 is how much time is left
+            len(GLADIATOR_NAMES) * 5 + 1
+        )  # 5 is the number of features for each gladiator (position x, position y, health, stamina, faced direction) and 1 is how much time is left
         self.q_network = nn.Sequential(
             nn.Linear(self.input_size, self.input_size * 2),
             nn.ReLU(),
@@ -123,12 +123,14 @@ class Gladiator:
         self.position = {"x": spawn_point["x"], "y": spawn_point["y"]}
         self.health = GLADIATOR_HEALTH
         self.stamina = GLADIATOR_STAMINA
+        self.faced_direction = 0
 
         self.damage = GLADIATOR_ATTACK_DAMAGE
         self.state = "stay"  # stay, walk, attack, block, dodge, rest
         self.range = GLADIATOR_ATTACK_RANGE
         self.speed = GLADIATOR_SPEED
         self.field_view_angle = np.pi / 3  # in grad
+        self.max_rotation = 30  # in grad
 
         self.gladiator_id = gladiator_id
         self.brain = Model(gladiator_name=self.name)
@@ -159,7 +161,8 @@ class Gladiator:
 
     def perform_action(self, gladiators):
         if self.state == "attack":
-            self.attack(self.direction, gladiators)
+            self.faced_direction = self.direction
+            self.attack( gladiators)
         elif self.state == "block":
             self.block()
         elif self.state == "dash":
@@ -169,7 +172,7 @@ class Gladiator:
         elif self.state == "walk":
             self.walk(self.direction)
 
-    def attack(self, direction, gladiators):
+    def attack(self, gladiators):
         """
         Permorf an attack, reward and block are handeled here:
         - if the gladiator have stamina enter in the attack condition
@@ -182,14 +185,14 @@ class Gladiator:
             gladiator_in_hitzone = []
             for gladiator in gladiators:
                 if gladiator != self and self.is_target_in_hitzone(
-                    gladiator, direction
+                    gladiator, self.faced_direction
                 ):
                     gladiator_in_hitzone.append(gladiator)
 
             for target in gladiator_in_hitzone:
                 self.reward += SUCCESFULL_ATTACK_REWARD  # attack hitted
                 if target.state == "block" and target.is_target_in_hitzone(
-                    self, target.direction
+                    self, target.faced_direction
                 ):  # target blocked succesfully
                     target.stamina -= 5
                     target.reward += BLOCKED_ATTACK_REWARD  # attack blocke
@@ -309,11 +312,14 @@ class Gladiator:
         input = self.convert_state_to_tensor(arena_state)
         self.brain.upgrade(self.reward, input)
 
+    def rescale_direction(self, direction):
+        "Rescale the direction(angle between 0 and 360) into the range from -max rotation to max rotation and return it as a float"
+        return ((direction ) / (360)) * self.max_rotation
 
 def convert_direction_to_vector(direction):
+    "Transform the direction (in degrees) in a vector with unitary magnitude and return it as a dictionary with keys x and y"
     radian_direction = np.radians(direction)
     return {"x": np.cos(radian_direction), "y": np.sin(radian_direction)}
-
 
 class Enviroment:
 
@@ -337,6 +343,7 @@ class Enviroment:
                     gladiator.position["y"],
                     gladiator.health,
                     gladiator.stamina,
+                    gladiator.faced_direction,
                 ],
                 dtype=torch.float32,
             )
