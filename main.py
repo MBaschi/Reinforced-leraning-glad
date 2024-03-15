@@ -81,7 +81,6 @@ if __name__ == "__main__":
                     ),
                     100,
                 ):
-                    # with writer.saving(fig, os.path.join(SIMUALTION_RECORD_PATH,f"recording_epoch_{epoch}.mp4"), 100):
                     run_episode(arena, draw=True, epsilon=epoch/TRAINING_EPISODES)
             else:
                 run_episode(arena,epsilon=epoch/TRAINING_EPISODES)

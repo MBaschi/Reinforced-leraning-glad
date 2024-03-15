@@ -130,7 +130,7 @@ class Gladiator:
         self.range = GLADIATOR_ATTACK_RANGE
         self.speed = GLADIATOR_SPEED
         self.field_view_angle = np.pi / 3  # in grad
-        self.max_rotation = 30  # in grad
+        self.max_rotation = 5  # in grad
 
         self.gladiator_id = gladiator_id
         self.brain = Model(gladiator_name=self.name)
@@ -434,7 +434,7 @@ class Enviroment:
                 (gladiator.position["x"], gladiator.position["y"]),
                 gladiator.health,
                 gladiator.stamina,
-                gladiator.direction,
+                gladiator.faced_direction,
                 gladiator.state,
             )
 
