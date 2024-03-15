@@ -161,9 +161,10 @@ class Gladiator:
 
     def perform_action(self, gladiators):
         if self.state == "attack":
-            self.faced_direction = self.direction
+            self.faced_direction += rescale_and_transform(self.direction, self.max_rotation)
             self.attack( gladiators)
         elif self.state == "block":
+            self.faced_direction += rescale_and_transform(self.direction, self.max_rotation)
             self.block()
         elif self.state == "dash":
             self.dash(self.direction)
@@ -320,6 +321,22 @@ def convert_direction_to_vector(direction):
     "Transform the direction (in degrees) in a vector with unitary magnitude and return it as a dictionary with keys x and y"
     radian_direction = np.radians(direction)
     return {"x": np.cos(radian_direction), "y": np.sin(radian_direction)}
+
+def rescale_and_transform(value, max_rotation):
+    "Rescale the value in the range from 0 to 360 and transform it in the range from -max_rotation to max_rotation and return it as a float"
+    "this is used because the q network output is a value between 0 and int(360 / RADIAL_RESOLUTION) and have to be transformed in a value between -max_rotation and max_rotation in case is an action with rotation (attack or block)"
+    # Rescale from 0-int(360/RADIAL_RESOLUTION) to -max_rotation to max_rotation
+    old_min = 0
+    old_max = int(360 / RADIAL_RESOLUTION)
+    new_min = -max_rotation
+    new_max = max_rotation
+
+    rescaled_value = ((value - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min
+
+    # Transform to 0-360
+    transformed_value = rescaled_value % 360
+
+    return transformed_value
 
 class Enviroment:
 
