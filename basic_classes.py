@@ -3,10 +3,11 @@
 - Gladiator: the gladiator object 
 - Enviroment: the enviroment of the game 
 """
-
+import os
 import copy
-import numpy as np
 import random
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
@@ -66,25 +67,25 @@ class Model:
         self.loss_function = nn.MSELoss()
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=0.001)
         self.discount_factor = 0.99
-        self.loss_record=[]
+        self.loss_save=0
 
     def next_action(self, state: torch.Tensor, epsilon: float) -> torch.Tensor:
         "Return the index of the action with the highest q value for the given state and the direction of the action"
 
         # choose the action with the highest q value
         self.q_values = self.q_network(state)
-        self.action_taken = torch.argmax(self.q_values).item()
+        self.winner_neuron = torch.argmax(self.q_values).item()
 
         # epsilon-greedy exploration
         if random.random() < epsilon:
-            self.action_taken = random.randint(0, self.output_size - 1)
+            self.winner_neuron = random.randint(0, self.output_size - 1)
 
-        if self.action_taken == self.output_size:
+        if self.winner_neuron == self.output_size:
             return NUM_POSSIBLE_ACTIONS, 0  # action "rest" does not have a direction
 
         # transform the action index in the action and the direction
         action_index, direction_index = divmod(
-            self.action_taken, int(360 / RADIAL_RESOLUTION)
+            self.winner_neuron, int(360 / RADIAL_RESOLUTION)
         )
         # action in degrees
         direction = direction_index * RADIAL_RESOLUTION
@@ -101,10 +102,10 @@ class Model:
         return target_q_value
 
     def upgrade(self, reward: torch.Tensor, next_state: torch.Tensor) -> None:
-        predicted_q_value = self.q_values[self.action_taken]
+        predicted_q_value = self.q_values[self.winner_neuron]
         target_q_value = self.calculate_target_q_values(reward, next_state)
         loss = self.loss_function(predicted_q_value, target_q_value)
-        self.loss_record.append(loss.item())
+        self.loss_save=loss.item()
         loss.backward(retain_graph=True)
         self.optimizer.step()
         self.optimizer.zero_grad()
@@ -117,7 +118,7 @@ class Gladiator:
 
     possible_actions = ["attack", "block", "dash", "rest", "walk"]
 
-    def __init__(self, name, gladiator_id, spawn_point):
+    def __init__(self, name, id, spawn_point):
         self.name = name
 
         self.position = {"x": spawn_point["x"], "y": spawn_point["y"]}
@@ -132,7 +133,7 @@ class Gladiator:
         self.field_view_angle = np.pi / 3  # in grad
         self.max_rotation = 5  # in grad
 
-        self.gladiator_id = gladiator_id
+        self.id = id
         self.brain = Model(gladiator_name=self.name)
 
         self.target = None
@@ -142,8 +143,8 @@ class Gladiator:
     def convert_state_to_tensor(self, state):
         """Transform the dictionary state to a torch tensor in wich each row is a gladitor state
         the first row is the state of the gladiator itself"""
-        my_state = state[self.gladiator_id]
-        state.pop(self.gladiator_id)
+        my_state = state[self.id]
+        state.pop(self.id)
         state_tensor = [my_state] + [state[keys_left] for keys_left in state]
         state_tensor = torch.cat(state_tensor)
         return state_tensor
@@ -354,7 +355,7 @@ class Enviroment:
         """
         arena_state = {}
         for gladiator in self.gladiators:
-            arena_state[gladiator.gladiator_id] = torch.tensor(
+            arena_state[gladiator.id] = torch.tensor(
                 [
                     gladiator.position["x"],
                     gladiator.position["y"],
@@ -513,3 +514,79 @@ class Enviroment:
             position[1] + GLADIATOR_ATTACK_RANGE * np.sin(np.radians(direction)),
         ]
         ax.plot(direction_line_x, direction_line_y, color=(1, 1, 1))
+
+class Recorder:
+    "This class handle the recording of the simulation variables "
+    def __init__(self):
+        self.loss_record_single_step = []
+        self.reward_record_single_step = []
+        self.loss_collected_by_episode = []
+        self.reward_collected_by_episode = []
+
+    def record(self,enviroment):
+        self.loss_record_single_step.append(enviroment.gladiators[0].brain.loss_save)
+        self.reward_record_single_step.append(enviroment.gladiators[1].reward)
+        #for gladiator in enviroment.gladiators:
+        #    self.loss_record_single_step.append(gladiator.brain.loss_save)
+        #    self.reward_record_single_step.append(gladiator.reward)
+
+    def save_record(self):
+        self.loss_collected_by_episode.append(self.loss_record_single_step)
+        self.reward_collected_by_episode.append(self.reward_record_single_step)
+        self.loss_record_single_step = []
+        self.reward_record_single_step = []
+    
+    def save_to_csv(self, path):
+        # Convert the lists to a DataFrame
+        df_loss = pd.DataFrame(self.loss_collected_by_episode).transpose()
+        df_reward = pd.DataFrame(self.reward_collected_by_episode).transpose()
+        # Save the DataFrame to a CSV file
+        df_loss.to_csv(os.path.join(path, "loss.csv"), index=False)
+        df_reward.to_csv(os.path.join(path, "reward.csv"), index=False)
+
+
+class State_converter():
+    "This class is the inbetwwen, the gladiator and the enviroment, the gladiator and the neural network"
+    "Is basically the traslator of the game"
+    Rotation_resolution_degree = 10
+
+    #define for each action how many different direction can be taken
+    action_dict = { 
+                    "attack": Rotation_resolution_degree, 
+                    "block": Rotation_resolution_degree, 
+                    "dash": int(360 / RADIAL_RESOLUTION), 
+                    "walk": int(360 / RADIAL_RESOLUTION),
+                    "rest": 1
+                   }
+    
+    def __init__(self):
+        action_space_size = np.sum([value for value in self.action_dict.values()]) 
+
+    def convert_state_to_NN_input(self, state, gladiator):
+        "Transform the dictionary state to a torch tensor in wich each row is a gladitor state"
+        my_state = state[gladiator.id]
+        state.pop(gladiator.id)
+        state_tensor = [my_state] + [state[keys_left] for keys_left in state]
+        state_tensor = torch.cat(state_tensor)
+        return state_tensor
+
+    def translate_NN_output(self, output_neuron):
+        "Transform the output of the neural network in a action and a direction"
+        pass
+        # counter=0
+        # for action, possible_values in self.action_dict.items():
+            # if counter < direction:
+                # return action, output_neuro
+            # else:
+                # output_neuro -= direction
+        # if self.winner_neuron == self.output_size:
+            # return NUM_POSSIBLE_ACTIONS, 0  # action "rest" does not have a direction
+# 
+        #transform the action index in the action and the direction
+        # action_index, direction_index = divmod(
+            # self.winner_neuron, int(360 / RADIAL_RESOLUTION)
+        # )
+        #action in degrees
+        # direction = direction_index * RADIAL_RESOLUTION
+        # return action_index, direction
+        # return action_name, action_parameter

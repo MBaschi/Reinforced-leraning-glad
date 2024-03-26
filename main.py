@@ -5,8 +5,7 @@ from random import randint
 import matplotlib.pyplot as plt
 #from torch.utils.tensorboard import SummaryWriter
 from matplotlib.animation import PillowWriter
-from matplotlib.animation import FFMpegWriter
-from basic_classes import Enviroment
+from basic_classes import Enviroment, Recorder
 from config import (
     GLADIATOR_NAMES,
     TIMER,
@@ -21,7 +20,6 @@ from config import (
 )
 from tqdm import tqdm
 
-
 fig = plt.figure(figsize=(SCREEN_WIDTH, SCREEN_HEIGHT))
 plt.xlim(0, ARENA_SIZE)
 plt.ylim(0, ARENA_SIZE)
@@ -29,8 +27,8 @@ plt.ylim(0, ARENA_SIZE)
 ax = fig.add_subplot(111)
 metadata = dict(title=f"Simulation movie", artist="Baschi")
 writer = PillowWriter(fps=FPS, metadata=metadata)
-# writer=FFMpegWriter(fps=30, metadata=metadata)
-#tensorboard_writer = SummaryWriter()
+
+recorder=Recorder() # used to record loss and reward over time and episodes
 
 def spawn_gladiators(arena):
     i=0
@@ -40,14 +38,13 @@ def spawn_gladiators(arena):
         spawn_point = {"x": randint(int(0.45*ARENA_SIZE), int(0.55*ARENA_SIZE)), "y": randint(int(0.45*ARENA_SIZE), int(0.55*ARENA_SIZE))}
         gladiator.respawn(spawn_point)
 
-
 def run_episode(arena, draw=False, epsilon=0.1):
     with tqdm(total=TIMER, desc="Episode progress", leave=False) as pbar:
         spawn_gladiators(arena)
         for t in range(TIMER):
             # calculate arena next state
             game_ended = arena.run_frame(time=t, epsilon=epsilon)
-
+            recorder.record(enviroment=arena)
             # draw arena state
             if draw:
                 arena.draw(ax, time=t)
@@ -59,10 +56,10 @@ def run_episode(arena, draw=False, epsilon=0.1):
             # check if the game ended
             if game_ended:
                 break
-
+            
             pbar.update()
-
-
+        recorder.save_record()
+        
 if __name__ == "__main__":
     # set up the arena
     arena = Enviroment()
@@ -70,7 +67,7 @@ if __name__ == "__main__":
     for name in GLADIATOR_NAMES:
         first_spawn_point = {"x": randint(0, ARENA_SIZE), "y": randint(0, ARENA_SIZE)}
         arena.add_gladiator(name, first_spawn_point)
-
+    
     with tqdm(total=TRAINING_EPISODES, desc="Training progress") as pbar:
         for epoch in range(TRAINING_EPISODES):
             if VIEW and epoch % VIEW_EVERY == 0:
@@ -85,3 +82,4 @@ if __name__ == "__main__":
             else:
                 run_episode(arena,epsilon=epoch/TRAINING_EPISODES)
             pbar.update()
+    recorder.save_to_csv(path=SIMUALTION_RECORD_PATH)

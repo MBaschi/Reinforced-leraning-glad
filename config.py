@@ -17,7 +17,7 @@ GLADIATOR_NAMES = [
     "A",
     "B",
 ]  # this list decide also the number of gladiators in the game
-TIMER = 1000  # max number of turns
+TIMER = 100  # max number of turns
 
 # ARENA VARIABLE
 ARENA_SIZE = 100
@@ -36,7 +36,7 @@ NO_STAMINA_PENALTY = -0.5
 USELESS_REST_PENALTY = -0.2
 
 # TRAINING VARIABLES
-TRAINING_EPISODES = 100
+TRAINING_EPISODES = 2
 
 # VISUALIZATION VARIABLES
 VIEW = True
